@@ -1,5 +1,6 @@
 ## Demo Videos
 
-<video controls src="demo1.mp4" title="Title"></video>
+![Demo1](demo1.gif)
 
-<video controls src="demo2.mp4" title="Title"></video>
+![Demo2](demo2.gif)
+
