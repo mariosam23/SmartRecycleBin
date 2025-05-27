@@ -1,97 +1,131 @@
+#include <LiquidCrystal_I2C.h>
 #include <Servo.h>
-#include <SoftwareSerial.h>
 
-//  Pins 
-const int servoPin = 6;
-const int waterSensorPin = A0;
-const int espRx = 2;
-const int espTx = 3;
+// Constants 
+#define LCD_ADDR 0x27
+#define LCD_COLS 16
+#define LCD_ROWS 2
 
-//  Constants 
-const int waterThreshold = 500;
-const unsigned long OPEN_DURATION = 3000;
-const unsigned long WATER_MSG_INTERVAL = 2000;
+#define SERVO_PIN 6
+#define WATER_SENSOR_PIN A0
+#define BUZZER_PIN 7
 
-//  State Variables 
-Servo myServo;
-SoftwareSerial espSerial(espRx, espTx);
+#define WATER_THRESHOLD 300
+#define OPEN_DURATION_MS 3000
+#define WATER_MSG_INTERVAL 2000
+
+#define SERVO_OPEN_POS 0
+#define SERVO_CLOSED_POS 90
+#define BUZZER_FREQ_HZ 1000
+#define BUZZER_TONE_DURATION 300
+
+// Objects and State Variables 
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+Servo sgServo;
+
 bool isOpen = false;
 unsigned long lastOpenTime = 0;
 unsigned long lastWaterMsg = 0;
+int lastWaterRead = 0;
 
-//  Function Prototypes 
 void setupServo();
 void checkWaterSensor();
 void handleEspCommand();
 void openServo();
 void closeServo();
 void autoCloseCheck();
+void updateLcd();
 
 void setup() {
-	Serial.begin(9600);
-	espSerial.begin(9600);
-	setupServo();
+  Serial.begin(9600);
+
+  setupServo();
+  // Buzzer pin is set as output
+  DDRD |= (1 << BUZZER_PIN);
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing");
+  // Simulating loading...
+  delay(500);
 }
 
 void loop() {
-	checkWaterSensor();
-	handleEspCommand();
-	autoCloseCheck();
+  checkWaterSensor();
+  handleEspCommand();
+  autoCloseCheck();
+  updateLcd();
 }
 
-//  Initialize Servo 
+// Initially servo is closed
 void setupServo() {
-	myServo.attach(servoPin);
-	// Initial CLOSED
-	myServo.write(90);
-	isOpen = false;
+  sgServo.attach(SERVO_PIN);
+  sgServo.write(SERVO_CLOSED_POS);
+  isOpen = false;
 }
 
-//  Check Water Sensor 
 void checkWaterSensor() {
-	int waterValue = analogRead(waterSensorPin);
-	
-	if (waterValue > waterThreshold && millis() - lastWaterMsg > WATER_MSG_INTERVAL) {
-		espSerial.println("WATER");
-		Serial.println("Water detected. Sent 'WATER' to ESP32");
-		lastWaterMsg = millis();
-	}
+  int waterValue = analogRead(WATER_SENSOR_PIN);
+  lastWaterRead = waterValue;
+
+  if (waterValue > WATER_THRESHOLD && millis() - lastWaterMsg > WATER_MSG_INTERVAL) {
+    Serial.println("WATER");
+
+    unsigned long startTime = millis();
+    while (millis() - startTime < BUZZER_TONE_DURATION) {
+      // High
+      PORTD |= (1 << BUZZER_PIN);
+      delayMicroseconds(500);
+      // Low
+      PORTD &= ~(1 << BUZZER_PIN);
+      delayMicroseconds(500);
+    }
+    PORTD &= ~(1 << BUZZER_PIN);
+
+    lastWaterMsg = millis();
+  }
 }
 
-//  Handle Incoming Command from ESP32 
 void handleEspCommand() {
-	if (espSerial.available()) {
-		String cmd = espSerial.readStringUntil('\n');
-		cmd.trim();
-		Serial.print("Received from ESP32: "); Serial.println(cmd);
+  if (!Serial.available()) return;
 
-		if (cmd.equalsIgnoreCase("OPEN")) {
-			if (!isOpen) openServo();
-			lastOpenTime = millis();
-		} else if (cmd.equalsIgnoreCase("CLOSE")) {
-			if (isOpen) closeServo();
-		}
-	}
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+
+  if (cmd.equalsIgnoreCase("OPEN")) {
+    if (!isOpen) openServo();
+    lastOpenTime = millis();
+  }
+  else if (cmd.equalsIgnoreCase("CLOSE")) {
+    if (isOpen) closeServo();
+  }
 }
 
-//  Open Servo 
 void openServo() {
-	myServo.write(0);
-	isOpen = true;
-	Serial.println("Servo OPEN");
+  sgServo.write(SERVO_OPEN_POS);
+  isOpen = true;
 }
 
-//  Close Servo 
 void closeServo() {
-	myServo.write(90);
-	isOpen = false;
-	Serial.println("Servo CLOSE");
+  sgServo.write(SERVO_CLOSED_POS);
+  isOpen = false;
 }
 
-//  Auto-close after timeout 
 void autoCloseCheck() {
-	if (isOpen && millis() - lastOpenTime > OPEN_DURATION) {
-		closeServo();
-		Serial.println("Servo close after 3s");
-	}
+  if (isOpen && millis() - lastOpenTime > OPEN_DURATION_MS) {
+    closeServo();
+  }
+}
+
+void updateLcd() {
+  lcd.setCursor(0, 0);
+  lcd.print("Status:");
+  lcd.print(isOpen ? "OPENED " : "CLOSED");
+
+  lcd.setCursor(0, 1);
+  lcd.print("H2O:");
+  lcd.print(lastWaterRead);
+  lcd.print("    ");
 }
